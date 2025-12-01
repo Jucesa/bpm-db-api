@@ -1,109 +1,141 @@
-require('dotenv').config(); // Carrega variáveis do .env
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
-const { PrismaClient } = require('@prisma/client');
-const { accelerate } = require('@prisma/extension-accelerate');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-
-
-const prisma = new PrismaClient().$extends(accelerate({
-    // opção opcional: cache ttl em ms
-    ttl: 5000
-}));
-
 const SALT_ROUNDS = parseInt(process.env.SALT_ROUNDS || '10');
+const PORT = process.env.PORT || 3000;
+
+// Conexão com o banco
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false } // necessário para Neon/Supabase/Render
+});
 
 // ===== ROTAS =====
 
-// (1) Criar usuário
+// Criar usuário
 app.post('/usuarios', async (req, res) => {
     const { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha } = req.body;
 
-    if (!nomeCompleto || !email || !senha) {
+    if (!nomeCompleto || !email || !senha)
         return res.status(400).json({ erro: 'Nome, email e senha são obrigatórios.' });
-    }
 
     try {
-        const existente = await prisma.usuario.findUnique({ where: { email } });
-        if (existente) return res.status(400).json({ erro: 'Email já cadastrado.' });
+        const client = await pool.connect();
+
+        const result = await client.query('SELECT id FROM usuarios WHERE email=$1', [email]);
+        if (result.rows.length > 0) {
+            client.release();
+            return res.status(400).json({ erro: 'Email já cadastrado.' });
+        }
 
         const senhaHash = await bcrypt.hash(senha, SALT_ROUNDS);
+        const insertQuery = `
+      INSERT INTO usuarios (nomeCompleto, email, telefone, instituicao, areaConhecimento, senha)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, nomeCompleto, email, telefone, instituicao, areaConhecimento
+    `;
+        const insertResult = await client.query(insertQuery, [
+            nomeCompleto, email, telefone, instituicao, areaConhecimento, senhaHash
+        ]);
 
-        const novoUsuario = await prisma.usuario.create({
-            data: { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha: senhaHash }
-        });
+        client.release();
 
-        res.status(201).json({ mensagem: 'Usuário cadastrado com sucesso!', usuario: novoUsuario });
+        res.status(201).json({ mensagem: 'Usuário cadastrado com sucesso!', usuario: insertResult.rows[0] });
+
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
 });
 
-// (2) Listar usuários (sem senha)
+// Listar usuários
 app.get('/usuarios', async (req, res) => {
-    const usuarios = await prisma.usuario.findMany({
-        select: { id: true, nomeCompleto: true, email: true, telefone: true, instituicao: true, areaConhecimento: true }
-    });
-    res.json(usuarios);
+    try {
+        const client = await pool.connect();
+        const result = await client.query('SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento FROM usuarios');
+        client.release();
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ erro: error.message });
+    }
 });
 
-// (3) Buscar 1 usuário (sem senha)
+// Buscar 1 usuário
 app.get('/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
-    const usuario = await prisma.usuario.findUnique({
-        where: { id },
-        select: { id: true, nomeCompleto: true, email: true, telefone: true, instituicao: true, areaConhecimento: true }
-    });
+    try {
+        const client = await pool.connect();
+        const result = await client.query(
+            'SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento FROM usuarios WHERE id=$1',
+            [id]
+        );
+        client.release();
 
-    if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado.' });
-    res.json(usuario);
+        if (result.rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(500).json({ erro: error.message });
+    }
 });
 
-// (4) Atualizar usuário
+// Atualizar usuário
 app.put('/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     const { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha } = req.body;
 
     try {
-        const dataAtualizacao = { nomeCompleto, email, telefone, instituicao, areaConhecimento };
+        const client = await pool.connect();
 
-        if (senha) dataAtualizacao.senha = await bcrypt.hash(senha, SALT_ROUNDS);
+        let senhaHash = null;
+        if (senha) senhaHash = await bcrypt.hash(senha, SALT_ROUNDS);
 
-        const usuarioAtualizado = await prisma.usuario.update({ where: { id }, data: dataAtualizacao });
+        const updateQuery = `
+      UPDATE usuarios SET
+        nomeCompleto = COALESCE($1, nomeCompleto),
+        email = COALESCE($2, email),
+        telefone = COALESCE($3, telefone),
+        instituicao = COALESCE($4, instituicao),
+        areaConhecimento = COALESCE($5, areaConhecimento),
+        senha = COALESCE($6, senha)
+      WHERE id = $7
+      RETURNING id, nomeCompleto, email, telefone, instituicao, areaConhecimento
+    `;
+        const result = await client.query(updateQuery, [
+            nomeCompleto, email, telefone, instituicao, areaConhecimento, senhaHash, id
+        ]);
 
-        res.json({
-            mensagem: 'Usuário atualizado.',
-            usuario: {
-                id: usuarioAtualizado.id,
-                nomeCompleto: usuarioAtualizado.nomeCompleto,
-                email: usuarioAtualizado.email,
-                telefone: usuarioAtualizado.telefone,
-                instituicao: usuarioAtualizado.instituicao,
-                areaConhecimento: usuarioAtualizado.areaConhecimento
-            }
-        });
+        client.release();
+
+        if (result.rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        res.json({ mensagem: 'Usuário atualizado.', usuario: result.rows[0] });
+
     } catch (error) {
-        res.status(404).json({ erro: 'Usuário não encontrado ou erro ao atualizar.' });
+        res.status(500).json({ erro: error.message });
     }
 });
 
-// (5) Remover usuário
+// Remover usuário
 app.delete('/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
 
     try {
-        await prisma.usuario.delete({ where: { id } });
+        const client = await pool.connect();
+        const result = await client.query('DELETE FROM usuarios WHERE id=$1 RETURNING id', [id]);
+        client.release();
+
+        if (result.rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
         res.json({ mensagem: 'Usuário removido com sucesso.' });
+
     } catch (error) {
-        res.status(404).json({ erro: 'Usuário não encontrado.' });
+        res.status(500).json({ erro: error.message });
     }
 });
 
 // ===== Iniciar servidor =====
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`API rodando em http://localhost:${PORT}`));
