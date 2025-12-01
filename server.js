@@ -3,12 +3,19 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const { PrismaClient } = require('@prisma/client');
+const { accelerate } = require('@prisma/extension-accelerate');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const prisma = new PrismaClient(); // Prisma vai ler DATABASE_URL do .env
+
+
+const prisma = new PrismaClient().$extends(accelerate({
+    // opção opcional: cache ttl em ms
+    ttl: 5000
+}));
+
 const SALT_ROUNDS = parseInt(process.env.SALT_ROUNDS || '10');
 
 // ===== ROTAS =====
