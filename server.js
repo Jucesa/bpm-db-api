@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 // Conexão com o banco
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false } // necessário para Neon/Supabase/Render
+    ssl: { rejectUnauthorized: false }
 });
 
 // ===== ROTAS =====
@@ -61,6 +61,14 @@ app.get('/usuarios', async (req, res) => {
         const result = await client.query('SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento FROM usuarios');
         client.release();
         res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ erro: error.message });
+    }
+});
+
+app.get('/aa', async (req, res) => {
+    try {
+        res.json({"aa":"dois"});
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
