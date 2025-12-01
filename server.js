@@ -1,116 +1,76 @@
-const express = require("express");
-const cors = require("cors");
-const bcrypt = require("bcrypt");
-const { PrismaClient } = require("@prisma/client");
+require('dotenv').config(); // Carrega variáveis do .env
+const express = require('express');
+const cors = require('cors');
+const bcrypt = require('bcrypt');
+const { PrismaClient } = require('@prisma/client');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const prisma = new PrismaClient();
-const SALT_ROUNDS = 10; // para bcrypt
+const prisma = new PrismaClient(); // Prisma vai ler DATABASE_URL do .env
+const SALT_ROUNDS = parseInt(process.env.SALT_ROUNDS || '10');
+
+// ===== ROTAS =====
 
 // (1) Criar usuário
-app.post("/usuarios", async (req, res) => {
+app.post('/usuarios', async (req, res) => {
     const { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha } = req.body;
 
     if (!nomeCompleto || !email || !senha) {
-        return res.status(400).json({ erro: "Nome, email e senha são obrigatórios." });
+        return res.status(400).json({ erro: 'Nome, email e senha são obrigatórios.' });
     }
 
     try {
-        // Verificar se email já existe
         const existente = await prisma.usuario.findUnique({ where: { email } });
-        if (existente) {
-            return res.status(400).json({ erro: "Email já cadastrado." });
-        }
+        if (existente) return res.status(400).json({ erro: 'Email já cadastrado.' });
 
-        // Hash da senha
         const senhaHash = await bcrypt.hash(senha, SALT_ROUNDS);
 
         const novoUsuario = await prisma.usuario.create({
-            data: {
-                nomeCompleto,
-                email,
-                telefone,
-                instituicao,
-                areaConhecimento,
-                senha: senhaHash
-            }
+            data: { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha: senhaHash }
         });
 
-        res.status(201).json({
-            mensagem: "Usuário cadastrado com sucesso!",
-            usuario: novoUsuario
-        });
+        res.status(201).json({ mensagem: 'Usuário cadastrado com sucesso!', usuario: novoUsuario });
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
 });
 
-// (2) Listar usuários (não retorna senha)
-app.get("/usuarios", async (req, res) => {
+// (2) Listar usuários (sem senha)
+app.get('/usuarios', async (req, res) => {
     const usuarios = await prisma.usuario.findMany({
-        select: {
-            id: true,
-            nomeCompleto: true,
-            email: true,
-            telefone: true,
-            instituicao: true,
-            areaConhecimento: true
-        }
+        select: { id: true, nomeCompleto: true, email: true, telefone: true, instituicao: true, areaConhecimento: true }
     });
     res.json(usuarios);
 });
 
-// (3) Buscar 1 usuário (não retorna senha)
-app.get("/usuarios/:id", async (req, res) => {
-    const { id } = req.params;
+// (3) Buscar 1 usuário (sem senha)
+app.get('/usuarios/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
     const usuario = await prisma.usuario.findUnique({
-        where: { id: parseInt(id) },
-        select: {
-            id: true,
-            nomeCompleto: true,
-            email: true,
-            telefone: true,
-            instituicao: true,
-            areaConhecimento: true
-        }
+        where: { id },
+        select: { id: true, nomeCompleto: true, email: true, telefone: true, instituicao: true, areaConhecimento: true }
     });
 
-    if (!usuario) {
-        return res.status(404).json({ erro: "Usuário não encontrado." });
-    }
-
+    if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado.' });
     res.json(usuario);
 });
 
 // (4) Atualizar usuário
-app.put("/usuarios/:id", async (req, res) => {
-    const { id } = req.params;
+app.put('/usuarios/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
     const { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha } = req.body;
 
     try {
-        // Se for atualizar a senha, hash novamente
-        const dataAtualizacao = {
-            nomeCompleto,
-            email,
-            telefone,
-            instituicao,
-            areaConhecimento
-        };
+        const dataAtualizacao = { nomeCompleto, email, telefone, instituicao, areaConhecimento };
 
-        if (senha) {
-            dataAtualizacao.senha = await bcrypt.hash(senha, SALT_ROUNDS);
-        }
+        if (senha) dataAtualizacao.senha = await bcrypt.hash(senha, SALT_ROUNDS);
 
-        const usuarioAtualizado = await prisma.usuario.update({
-            where: { id: parseInt(id) },
-            data: dataAtualizacao
-        });
+        const usuarioAtualizado = await prisma.usuario.update({ where: { id }, data: dataAtualizacao });
 
         res.json({
-            mensagem: "Usuário atualizado.",
+            mensagem: 'Usuário atualizado.',
             usuario: {
                 id: usuarioAtualizado.id,
                 nomeCompleto: usuarioAtualizado.nomeCompleto,
@@ -121,22 +81,22 @@ app.put("/usuarios/:id", async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(404).json({ erro: "Usuário não encontrado ou erro ao atualizar." });
+        res.status(404).json({ erro: 'Usuário não encontrado ou erro ao atualizar.' });
     }
 });
 
 // (5) Remover usuário
-app.delete("/usuarios/:id", async (req, res) => {
-    const { id } = req.params;
+app.delete('/usuarios/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
 
     try {
-        await prisma.usuario.delete({ where: { id: parseInt(id) } });
-        res.json({ mensagem: "Usuário removido com sucesso." });
+        await prisma.usuario.delete({ where: { id } });
+        res.json({ mensagem: 'Usuário removido com sucesso.' });
     } catch (error) {
-        res.status(404).json({ erro: "Usuário não encontrado." });
+        res.status(404).json({ erro: 'Usuário não encontrado.' });
     }
 });
 
-// ====== INICIAR SERVIDOR ==========
+// ===== Iniciar servidor =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`API rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`API rodando em http://localhost:${PORT}`));
