@@ -130,5 +130,33 @@ app.delete('/usuarios/:id', async (req, res) => {
     }
 });
 
+// Buscar usuário pelo email
+app.get('/usuarios/email/:email', async (req, res) => {
+    const { email } = req.params;
+
+    if (!email) {
+        return res.status(400).json({ erro: 'Email é obrigatório.' });
+    }
+
+    try {
+        const client = await pool.connect();
+        const query = `
+            SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento
+            FROM usuarios
+            WHERE email = $1
+        `;
+        const result = await client.query(query, [email]);
+        client.release();
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(500).json({ erro: error.message });
+    }
+});
+
 // ===== Iniciar servidor =====
 app.listen(PORT, () => console.log(`API rodando em http://localhost:${PORT}`));
