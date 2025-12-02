@@ -21,34 +21,34 @@ const pool = new Pool({
 
 // Criar usuário
 app.post('/usuarios', async (req, res) => {
-    const { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha } = req.body;
+    const { nomecompleto, email, telefone, instituicao, areaconhecimento, senha } = req.body;
 
-    if (!nomeCompleto || !email || !senha)
+    if (!nomecompleto || !email || !senha)
         return res.status(400).json({ erro: 'Nome, email e senha são obrigatórios.' });
 
     try {
         const client = await pool.connect();
 
-        const result = await client.query('SELECT id FROM usuarios WHERE email=$1', [email]);
-        if (result.rows.length > 0) {
+        // Verifica email existente
+        const { rows } = await client.query('SELECT id FROM usuarios WHERE email=$1', [email]);
+        if (rows.length > 0) {
             client.release();
             return res.status(400).json({ erro: 'Email já cadastrado.' });
         }
 
+        // Hash da senha
         const senhaHash = await bcrypt.hash(senha, SALT_ROUNDS);
-        const insertQuery = `
-      INSERT INTO usuarios (nomeCompleto, email, telefone, instituicao, areaConhecimento, senha)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, nomeCompleto, email, telefone, instituicao, areaConhecimento
-    `;
-        const insertResult = await client.query(insertQuery, [
-            nomeCompleto, email, telefone, instituicao, areaConhecimento, senhaHash
-        ]);
 
+        // Inserir usuário
+        const insertQuery = `
+            INSERT INTO usuarios (nomecompleto, email, telefone, instituicao, areaconhecimento, senha)
+            VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, nomecompleto, email, telefone, instituicao, areaconhecimento
+        `;
+        const insertResult = await client.query(insertQuery, [nomecompleto, email, telefone, instituicao, areaconhecimento, senhaHash]);
         client.release();
 
         res.status(201).json({ mensagem: 'Usuário cadastrado com sucesso!', usuario: insertResult.rows[0] });
-
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
@@ -58,17 +58,9 @@ app.post('/usuarios', async (req, res) => {
 app.get('/usuarios', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query('SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento FROM usuarios');
+        const { rows } = await client.query('SELECT id, nomecompleto, email, telefone, instituicao, areaconhecimento FROM usuarios');
         client.release();
-        res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ erro: error.message });
-    }
-});
-
-app.get('/aa', async (req, res) => {
-    try {
-        res.json({"aa":"dois"});
+        res.json(rows);
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
@@ -79,14 +71,14 @@ app.get('/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         const client = await pool.connect();
-        const result = await client.query(
-            'SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento FROM usuarios WHERE id=$1',
+        const { rows } = await client.query(
+            'SELECT id, nomecompleto, email, telefone, instituicao, areaconhecimento FROM usuarios WHERE id=$1',
             [id]
         );
         client.release();
 
-        if (result.rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
-        res.json(result.rows[0]);
+        if (rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        res.json(rows[0]);
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
@@ -95,34 +87,28 @@ app.get('/usuarios/:id', async (req, res) => {
 // Atualizar usuário
 app.put('/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
-    const { nomeCompleto, email, telefone, instituicao, areaConhecimento, senha } = req.body;
+    const { nomecompleto, email, telefone, instituicao, areaconhecimento, senha } = req.body;
 
     try {
         const client = await pool.connect();
-
-        let senhaHash = null;
-        if (senha) senhaHash = await bcrypt.hash(senha, SALT_ROUNDS);
+        const senhaHash = senha ? await bcrypt.hash(senha, SALT_ROUNDS) : null;
 
         const updateQuery = `
       UPDATE usuarios SET
-        nomeCompleto = COALESCE($1, nomeCompleto),
+        nomecompleto = COALESCE($1, nomecompleto),
         email = COALESCE($2, email),
         telefone = COALESCE($3, telefone),
         instituicao = COALESCE($4, instituicao),
-        areaConhecimento = COALESCE($5, areaConhecimento),
+        areaconhecimento = COALESCE($5, areaconhecimento),
         senha = COALESCE($6, senha)
       WHERE id = $7
-      RETURNING id, nomeCompleto, email, telefone, instituicao, areaConhecimento
+      RETURNING id, nomecompleto, email, telefone, instituicao, areaconhecimento
     `;
-        const result = await client.query(updateQuery, [
-            nomeCompleto, email, telefone, instituicao, areaConhecimento, senhaHash, id
-        ]);
-
+        const { rows } = await client.query(updateQuery, [nomecompleto, email, telefone, instituicao, areaconhecimento, senhaHash, id]);
         client.release();
 
-        if (result.rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
-        res.json({ mensagem: 'Usuário atualizado.', usuario: result.rows[0] });
-
+        if (rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        res.json({ mensagem: 'Usuário atualizado.', usuario: rows[0] });
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
@@ -134,12 +120,11 @@ app.delete('/usuarios/:id', async (req, res) => {
 
     try {
         const client = await pool.connect();
-        const result = await client.query('DELETE FROM usuarios WHERE id=$1 RETURNING id', [id]);
+        const { rows } = await client.query('DELETE FROM usuarios WHERE id=$1 RETURNING id', [id]);
         client.release();
 
-        if (result.rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+        if (rows.length === 0) return res.status(404).json({ erro: 'Usuário não encontrado.' });
         res.json({ mensagem: 'Usuário removido com sucesso.' });
-
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
