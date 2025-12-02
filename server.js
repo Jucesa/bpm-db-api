@@ -29,17 +29,14 @@ app.post('/usuarios', async (req, res) => {
     try {
         const client = await pool.connect();
 
-        // Verifica email existente
         const { rows } = await client.query('SELECT id FROM usuarios WHERE email=$1', [email]);
         if (rows.length > 0) {
             client.release();
             return res.status(400).json({ erro: 'Email já cadastrado.' });
         }
 
-        // Hash da senha
         const senhaHash = await bcrypt.hash(senha, SALT_ROUNDS);
 
-        // Inserir usuário
         const insertQuery = `
             INSERT INTO usuarios (nomecompleto, email, telefone, instituicao, areaconhecimento, senha)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -66,7 +63,7 @@ app.get('/usuarios', async (req, res) => {
     }
 });
 
-// Buscar 1 usuário
+// Buscar 1 usuário pelo ID
 app.get('/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
@@ -94,16 +91,16 @@ app.put('/usuarios/:id', async (req, res) => {
         const senhaHash = senha ? await bcrypt.hash(senha, SALT_ROUNDS) : null;
 
         const updateQuery = `
-      UPDATE usuarios SET
-        nomecompleto = COALESCE($1, nomecompleto),
-        email = COALESCE($2, email),
-        telefone = COALESCE($3, telefone),
-        instituicao = COALESCE($4, instituicao),
-        areaconhecimento = COALESCE($5, areaconhecimento),
-        senha = COALESCE($6, senha)
-      WHERE id = $7
-      RETURNING id, nomecompleto, email, telefone, instituicao, areaconhecimento
-    `;
+            UPDATE usuarios SET
+                                nomecompleto = COALESCE($1, nomecompleto),
+                                email = COALESCE($2, email),
+                                telefone = COALESCE($3, telefone),
+                                instituicao = COALESCE($4, instituicao),
+                                areaconhecimento = COALESCE($5, areaconhecimento),
+                                senha = COALESCE($6, senha)
+            WHERE id = $7
+                RETURNING id, nomecompleto, email, telefone, instituicao, areaconhecimento
+        `;
         const { rows } = await client.query(updateQuery, [nomecompleto, email, telefone, instituicao, areaconhecimento, senhaHash, id]);
         client.release();
 
@@ -130,29 +127,22 @@ app.delete('/usuarios/:id', async (req, res) => {
     }
 });
 
-// Buscar usuário pelo email
-app.get('/usuarios/email/:email', async (req, res) => {
-    const { email } = req.params;
+// Buscar usuário pelo e-mail (via query string)
+app.post('/usuarios/exists', async (req, res) => {
+    const { email } = req.body;
 
-    if (!email) {
-        return res.status(400).json({ erro: 'Email é obrigatório.' });
-    }
+    if (!email) return res.status(400).json({ erro: 'Email é obrigatório.' });
 
     try {
         const client = await pool.connect();
-        const query = `
-            SELECT id, nomeCompleto, email, telefone, instituicao, areaConhecimento
-            FROM usuarios
-            WHERE email = $1
-        `;
-        const result = await client.query(query, [email]);
+        const { rows } = await client.query(
+            'SELECT id, nomecompleto, email, telefone, instituicao, areaconhecimento FROM usuarios WHERE email=$1',
+            [email]
+        );
         client.release();
 
-        if (result.rows.length === 0) {
-            return res.status(404).json({ erro: 'Usuário não encontrado.' });
-        }
-
-        res.json(result.rows[0]);
+        if (rows.length === 0) return res.json({ exists: false });
+        res.json({ exists: true, usuario: rows[0] });
     } catch (error) {
         res.status(500).json({ erro: error.message });
     }
